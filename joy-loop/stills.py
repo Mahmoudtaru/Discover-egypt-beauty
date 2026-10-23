@@ -10,8 +10,7 @@ with sync_playwright() as p:
     pg.on('console', lambda m: print('console:', m.text))
     pg.on('pageerror', lambda e: print('ERR', e))
     pg.goto(html); pg.evaluate('window.ready'); 
-    print('fontOK', pg.evaluate('window.fontOK'), 'hookW', pg.evaluate('L.hookW'), 'DX0', pg.evaluate('L.DX0'))
-    print(pg.evaluate('Object.fromEntries(Object.entries(L.lines).map(([k,v])=>[k,{total:v.total,size:v.size}]))'))
+    print('fontOK', pg.evaluate('window.fontOK'))
     for t in times:
         pg.evaluate(f'render({t})')
         pg.screenshot(path=f'{out}/still_{t:05.2f}.png')
