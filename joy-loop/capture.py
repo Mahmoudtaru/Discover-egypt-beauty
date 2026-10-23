@@ -4,7 +4,7 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 CHROME = glob.glob('/opt/pw-browsers/chromium-*/chrome-linux*/chrome')[0]
 URL = 'file://' + os.path.abspath('joy-loop.html') + '?capture=1'
-OUT = sys.argv[1]; FPS = 30; NF = 360; SUB = 8; THR = 100.0
+OUT = sys.argv[1]; FPS = 30; NF = 360; SUB = 8; THR = 150.0
 def shot(pg, t):
     pg.evaluate(f'render({t!r})')
     return np.asarray(Image.open(io.BytesIO(pg.screenshot())).convert('RGB'), dtype=np.float32)
