@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Joy Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --green:#0E3B2E; --cream:#F4F1E6; --lime:#C8F25A; }
+  html,body { margin:0; height:100%; background:var(--green); overflow:hidden; }
+  #fit { position:absolute; left:0; top:0; transform-origin:0 0; }
+  #stage { width:1080px; height:1920px; position:relative; overflow:hidden; background:var(--green); }
+  svg { display:block; }
+  svg text { font-family:'Noto Naskh Arabic',serif; direction:rtl; unicode-bidi:isolate; letter-spacing:normal; }
+  #ui { position:fixed; left:0; right:0; bottom:0; display:flex; gap:12px; align-items:center; padding:10px 16px;
+        background:rgba(0,0,0,.45); font:14px system-ui,sans-serif; color:#F4F1E6; direction:ltr; }
+  #ui input { flex:1; accent-color:#C8F25A; }
+  #ui button { background:#C8F25A; color:#0E3B2E; border:0; border-radius:99px; padding:6px 16px; font-weight:600; cursor:pointer; }
+  body.capture #ui { display:none; }
+</style>
+</head>
+<body>
+<div id="fit"><div id="stage">
+<svg id="svg" xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <defs>
+    <radialGradient id="vig" gradientUnits="userSpaceOnUse" cx="540" cy="960" r="1101">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="0.40" stop-color="#000" stop-opacity="0"/>
+      <stop offset="0.87" stop-color="#000" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.10"/>
+    </radialGradient>
+
+    <!-- the gooey metaball filter: blur, then hard alpha threshold -->
+    <filter id="goo" filterUnits="userSpaceOnUse" x="-400" y="-300" width="1880" height="2520" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="28"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 36 -16"/>
+    </filter>
+    <!-- same goo, then a very soft low-opacity drop shadow -->
+    <filter id="gooShadow" filterUnits="userSpaceOnUse" x="-400" y="-300" width="1880" height="2520" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="28"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 36 -16"/>
+      <feGaussianBlur stdDeviation="34"/>
+      <feOffset dy="30"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.20 0"/>
+    </filter>
+    <filter id="glowBlur" x="-300%" y="-300%" width="700%" height="700%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+
+    <!-- one single source of truth for the shape; fill, shadow and both masks all <use> it -->
+    <g id="shapeSrc">
+      <circle id="cL" r="460"/>
+      <circle id="cR" r="460"/>
+      <circle id="cB" r="0"/>
+    </g>
+
+    <mask id="mIn" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920" color-interpolation="sRGB">
+      <g filter="url(#goo)"><use href="#shapeSrc" fill="#fff"/></g>
+    </mask>
+    <mask id="mOut" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920" color-interpolation="sRGB">
+      <rect width="1080" height="1920" fill="#fff"/>
+      <g filter="url(#goo)"><use href="#shapeSrc" fill="#000"/></g>
+    </mask>
+  </defs>
+
+  <rect width="1080" height="1920" fill="#0E3B2E"/>
+  <rect width="1080" height="1920" fill="url(#vig)"/>
+
+  <g filter="url(#gooShadow)"><use href="#shapeSrc" fill="#000"/></g>
+
+  <!-- outer layer: cream hook, visible only where it is green -->
+  <g id="outerLayer" mask="url(#mOut)">
+    <text id="hook" x="540" y="1000" text-anchor="middle" font-size="118" font-weight="700" fill="#F4F1E6">ما من بهجة</text>
+  </g>
+
+  <!-- visible cream shape -->
+  <g filter="url(#goo)"><use href="#shapeSrc" fill="#F4F1E6"/></g>
+
+  <!-- inner layer: deep-green lines, visible only inside the shape -->
+  <g id="innerLayer" mask="url(#mIn)"></g>
+
+  <!-- lime dot + glow inside the bump -->
+  <g id="dotG">
+    <circle id="dotGlow" r="32" fill="#C8F25A" filter="url(#glowBlur)"/>
+    <circle id="dot" r="12" fill="#C8F25A"/>
+  </g>
+</svg>
+</div></div>
+
+<div id="ui"><button id="play">Play</button><input id="scrub" type="range" min="0" max="12" step="0.0333333" value="0"><span id="tl">0.00s</span></div>
+
+<script>
+'use strict';
+/* ───────────────────────── constants ───────────────────────── */
+const W = 1080, H = 1920, CX = 540, CY = 960, R = 460;
+const DUR = 12.0;
+const SIZE_IN = 92, SIZE_HOOK = 118;
+const LIME = '#C8F25A', GREEN = '#0E3B2E';
+
+const LINES = {
+  A: [['أكثر', 0], ['عذوبة', 0]],
+  B: [['من', 0], ['أن', 0], ['تفاجئ', 0], ['إنساناً', 0]],
+  C: [['بمنحه', 0], ['أكثر', 1], ['قليلاً', 1]],           // 1 = key phrase (bold + pill)
+  D: [['مما', 0], ['كان', 0], ['يأمل', 0], ['فيه', 0]],
+};
+const T_ENTER = { B: 3.0, C: 5.25, D: 7.5 };                    // downbeat-aligned text changes
+const T_EXIT  = { A: 3.0, B: 5.25, C: 7.5 };
+const T_A_BACK = 11.9;                                          // A is re-armed while the mask hides everything
+const T_BUMP = 6.0;
+
+/* ───────────────────────── math helpers (pure) ───────────────────────── */
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const easeOutCubic = u => 1 - Math.pow(1 - u, 3);
+const easeInCubic = u => u * u * u;
+const easeInOutCubic = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const hermite = (u, p0, p1, m0, m1) => {
+  const u2 = u * u, u3 = u2 * u;
+  return (2*u3 - 3*u2 + 1) * p0 + (u3 - 2*u2 + u) * m0 + (-2*u3 + 3*u2) * p1 + (u3 - u2) * m1;
+};
+// closed-form damped spring 0→1 (fixed config, no randomness)
+const spring = (tau, zeta, omega) => {
+  if (tau <= 0) return 0;
+  if (zeta >= 1) return 1 - (1 + omega * tau) * Math.exp(-omega * tau);        // critical: no overshoot
+  const wd = omega * Math.sqrt(1 - zeta * zeta), k = zeta * omega;
+  return 1 - Math.exp(-k * tau) * (Math.cos(wd * tau) + (k / wd) * Math.sin(wd * tau));
+};
+
+/* ───────────────────────── layout (measured once, deterministic) ───────────────────────── */
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const L = { DX0: 740, DX1: 290, YB_FINAL: 520, YB_HIDE: 800, lines: {} };
+
+function mk(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function buildLines() {
+  const layer = $('innerLayer');
+  const GAP = 26, PAD = 24;
+  const BASE = 986;                                   // baseline y for inner text (tuned visually)
+  for (const name in LINES) {
+    const spec = LINES[name];
+    let size = SIZE_IN, words, total;
+    for (;;) {
+      const g = mk('g', { id: 'line' + name }, layer);
+      words = spec.map(([txt, key]) => {
+        const el = mk('text', { 'text-anchor': 'middle', y: BASE, 'font-size': size, 'font-weight': key ? 700 : 600, fill: GREEN }, g);
+        el.textContent = txt;
+        return { el, key, w: el.getComputedTextLength() };
+      });
+      const gaps = words.map((w, i) => i === 0 ? 0 : GAP + ((w.key !== words[i-1].key) ? PAD : 0));
+      total = words.reduce((s, w) => s + w.w, 0) + gaps.reduce((a, b) => a + b, 0);
+      if (total <= 950 || size <= 80) { words.gaps = gaps; words.g = g; break; }   // never overflow: shrink to ≥80
+      layer.removeChild(g); size -= 2;
+    }
+    // RTL placement: first word on the right
+    let xr = CX + total / 2;
+    words.forEach((w, i) => {
+      xr -= words.gaps[i];
+      w.cx = xr - w.w / 2; w.x0 = xr - w.w; w.x1 = xr;
+      w.el.setAttribute('x', w.cx.toFixed(2));
+      xr -= w.w;
+    });
+    const o = { g: words.g, words, size, total };
+    const keys = words.filter(w => w.key);
+    if (keys.length) {
+      const right = keys[0].x1 + PAD, left = keys[keys.length - 1].x0 - PAD;
+      const h = 132, cy = BASE - 30;                       // pill height / vertical centre relative to baseline (tuned visually)
+      const defs = $('svg').querySelector('defs');
+      const clip = mk('clipPath', { id: 'pillClip', clipPathUnits: 'userSpaceOnUse' }, defs);
+      o.clipRect = mk('rect', { x: right, y: cy - h, width: 0, height: 2 * h }, clip);
+      o.pill = mk('rect', { x: left, y: cy - h / 2, width: right - left, height: h, rx: h / 2, fill: LIME, 'clip-path': 'url(#pillClip)' }, words.g);
+      words.g.insertBefore(o.pill, words.g.firstChild);       // behind the words
+      o.pillL = left; o.pillR = right;
+    }
+    L.lines[name] = o;
+  }
+  // hook: set circle start from real text width so the cream text is never clipped at frame 0
+  const tw = $('hook').getComputedTextLength();
+  L.DX0 = 512 + tw / 2 + 8;                                 // left circle's inner edge sits ~44 px clear of the hook
+  L.hookW = tw;
+}
+
+/* ───────────────────────── motion model ───────────────────────── */
+function dxAt(t) {                                           // half-distance between the two big circle centres
+  const { DX0, DX1 } = L, drift = 22;
+  if (t < 1.5) return hermite(t / 1.5, DX0, DX0 - drift, 0, -42 * 1.5);
+  if (t < 3.0) return hermite((t - 1.5) / 1.5, DX0 - drift, DX1, -42 * 1.5, 0);
+  if (t < 9.75) return DX1;
+  return hermite((t - 9.75) / 2.25, DX1, DX0, 0, 0);
+}
+function breathe(t) {                                        // 1.00 → 1.02 → 1.00, 3 s period, only 3 s…9 s
+  if (t < 3 || t > 9) return 1;
+  return 1 + 0.01 * (1 - Math.cos(2 * Math.PI * (t - 3) / 3));
+}
+function bumpAt(t) {                                         // third circle: centre y and radius (local, pre-breathing coords)
+  const { YB_FINAL: yf, YB_HIDE: yh } = L;
+  if (t < T_BUMP) return { y: yh, r: 0 };
+  if (t < 9.75) {
+    const s = spring(t - T_BUMP, 0.6, 12);                   // the one and only overshoot in the film
+    return { y: yh + (yf - yh) * s, r: 120 * clamp((t - T_BUMP) / 0.06) };
+  }
+  const u = clamp((t - 9.75) / 0.7);
+  const y = yf + (yh + 40 - yf) * easeInOutCubic(u);
+  const r = 120 * (1 - easeInCubic(clamp((t - 10.05) / 0.4)));
+  return { y, r };
+}
+function dotAt(t) {                                          // lime dot scale/opacity/glow
+  let s = easeOutCubic(clamp((t - 6.12) / 0.4));
+  if (t >= 8.25 && t <= 8.75) s *= 1 + 0.25 * Math.sin(Math.PI * (t - 8.25) / 0.5);
+  let op = 1;
+  if (t >= 9.75) op = 1 - easeInCubic(clamp((t - 9.75) / 0.45));
+  return { s, op, glow: clamp((t - 6.12) / 0.5) * op };
+}
+
+function wordState(name, i, t) {                             // → {dy, op} for each word of a line
+  const hidden = { dy: 40, op: 0 }, rest = { dy: 0, op: 1 };
+  const enterAt = name === 'A' ? null : T_ENTER[name];
+  const exitAt = T_EXIT[name];
+  const exit = () => {
+    const tau = t - exitAt - i * 0.06;
+    if (tau <= 0) return rest;
+    const u = clamp(tau / 0.28), e = easeInCubic(u);
+    return u >= 1 ? { dy: -40, op: 0 } : { dy: -40 * e, op: 1 - e };
+  };
+  if (name === 'A') {
+    if (t >= T_A_BACK) return rest;
+    return t < exitAt ? rest : exit();
+  }
+  if (t < enterAt) return hidden;
+  if (exitAt !== undefined && t >= exitAt) return exit();
+  if (name === 'D' && t >= T_A_BACK) return hidden;
+  const tau = t - enterAt - i * 0.07;
+  if (tau <= 0) return hidden;
+  const p = spring(tau, 1, 18);                              // critically damped: lands without overshoot
+  return { dy: 40 * (1 - p), op: clamp(tau / 0.1) };
+}
+
+/* ───────────────────────── render(t): pure function of t ───────────────────────── */
+function render(tt) {
+  const t = ((tt % DUR) + DUR) % DUR;
+  const dx = dxAt(t), b = bumpAt(t), br = breathe(t), d = dotAt(t);
+
+  $('cL').setAttribute('cx', (CX - dx).toFixed(3)); $('cL').setAttribute('cy', CY);
+  $('cR').setAttribute('cx', (CX + dx).toFixed(3)); $('cR').setAttribute('cy', CY);
+  $('cB').setAttribute('cx', CX); $('cB').setAttribute('cy', b.y.toFixed(3)); $('cB').setAttribute('r', Math.max(0, b.r).toFixed(3));
+  const tf = `translate(${CX} ${CY}) scale(${br.toFixed(5)}) translate(${-CX} ${-CY})`;
+  $('shapeSrc').setAttribute('transform', tf);
+
+  // lime dot rides the bump (and the breathing)
+  const dg = $('dotG');
+  dg.setAttribute('transform', tf);
+  const vis = d.s > 0.001 && d.op > 0.001;
+  dg.setAttribute('visibility', vis ? 'visible' : 'hidden');
+  $('dot').setAttribute('cx', CX); $('dot').setAttribute('cy', b.y.toFixed(3));
+  $('dot').setAttribute('transform', `translate(${CX} ${b.y.toFixed(3)}) scale(${d.s.toFixed(4)}) translate(${-CX} ${-b.y.toFixed(3)})`);
+  $('dot').setAttribute('opacity', d.op.toFixed(4));
+  $('dotGlow').setAttribute('cx', CX); $('dotGlow').setAttribute('cy', b.y.toFixed(3));
+  $('dotGlow').setAttribute('opacity', (0.9 * d.glow).toFixed(4));
+  $('dotGlow').setAttribute('r', (32 * Math.max(d.s, 0)).toFixed(3));
+
+  for (const name in L.lines) {
+    const o = L.lines[name];
+    let any = false;
+    o.words.forEach((w, i) => {
+      const s = wordState(name, i, t);
+      w.st = s;
+      w.el.setAttribute('transform', `translate(0 ${s.dy.toFixed(3)})`);
+      w.el.setAttribute('opacity', s.op.toFixed(4));
+      if (s.op > 0.001) any = true;
+    });
+    o.g.setAttribute('visibility', any ? 'visible' : 'hidden');
+    if (o.pill) {                                            // pill wipes in right→left (RTL), 0.35 s ease-out from 6.0
+      const p = easeOutCubic(clamp((t - T_BUMP) / 0.35));
+      o.clipRect.setAttribute('x', (o.pillR - p * (o.pillR - o.pillL)).toFixed(3));
+      o.clipRect.setAttribute('width', (p * (o.pillR - o.pillL) + 0.5).toFixed(3));
+      const s = o.words[1].st;
+      o.pill.setAttribute('transform', `translate(0 ${s.dy.toFixed(3)})`);
+      o.pill.setAttribute('opacity', s.op.toFixed(4));
+    }
+  }
+}
+
+// px/s of the fastest moving shape feature — used by the capture script to apply motion blur only on fast moves
+function motionSpeed(t) {
+  const e = 1 / 240, a = Math.max(0, t - e), c = a + 2 * e;
+  const s = f => Math.abs(f(c) - f(a)) / (c - a);
+  return Math.max(s(dxAt), s(tt => bumpAt(tt).y) * (bumpAt(t).r > 1 ? 1 : 0));
+}
+
+/* ───────────────────────── boot ───────────────────────── */
+const params = new URLSearchParams(location.search);
+const CAPTURE = params.has('capture');
+if (CAPTURE) document.body.classList.add('capture');
+
+window.ready = (async () => {
+  const all = 'ما من بهجة أكثر عذوبة من أن تفاجئ إنساناً بمنحه قليلاً مما كان يأمل فيه';
+  await Promise.all([
+    document.fonts.load('700 118px "Noto Naskh Arabic"', all),
+    document.fonts.load('600 92px "Noto Naskh Arabic"', all),
+    document.fonts.load('700 92px "Noto Naskh Arabic"', all),
+  ]);
+  await document.fonts.ready;
+  window.fontOK = document.fonts.check('700 118px "Noto Naskh Arabic"', all) && document.fonts.check('600 92px "Noto Naskh Arabic"', all);
+  buildLines();
+  render(0);
+  window.isReady = true;
+  return true;
+})();
+
+/* preview-only chrome (hidden and unused when ?capture is set) */
+function fit() {
+  if (CAPTURE) return;
+  const k = Math.min(innerWidth / W, (innerHeight - 52) / H);
+  const f = $('fit'); f.style.transform = `scale(${k})`; f.style.left = ((innerWidth - W * k) / 2) + 'px'; f.style.top = '0px';
+}
+addEventListener('resize', fit); fit();
+if (!CAPTURE) {
+  let playing = false, t0 = 0;
+  const scrub = $('scrub'), tl = $('tl');
+  const show = t => { render(t); scrub.value = t; tl.textContent = t.toFixed(2) + 's'; };
+  scrub.addEventListener('input', () => { playing = false; $('play').textContent = 'Play'; show(+scrub.value); });
+  $('play').addEventListener('click', () => {
+    playing = !playing; $('play').textContent = playing ? 'Pause' : 'Play';
+    if (playing) { t0 = performance.now() - scrub.value * 1000; requestAnimationFrame(loop); }
+  });
+  function loop(now) { if (!playing) return; show(((now - t0) / 1000) % DUR); requestAnimationFrame(loop); }
+}
+</script>
+</body>
+</html>
