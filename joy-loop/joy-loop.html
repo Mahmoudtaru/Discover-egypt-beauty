@@ -53,7 +53,7 @@
     <g id="shapeSrc">
       <circle id="cL" r="460"/>
       <circle id="cR" r="460"/>
-      <circle id="cB" r="0"/>
+      <ellipse id="cB" rx="0" ry="0"/>
     </g>
 
     <mask id="mIn" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920" color-interpolation="sRGB">
@@ -74,6 +74,7 @@
 
   <!-- outer layer: cream hook, visible only where it is green -->
   <g id="outerLayer" mask="url(#mOut)">
+    <circle id="hopeOut" cx="540" cy="960" r="452" fill="none" stroke="#F4F1E6" visibility="hidden"/>
     <text id="hook" x="540" y="1000" text-anchor="middle" font-size="118" font-weight="700" fill="#F4F1E6">ما من بهجة</text>
   </g>
 
@@ -81,7 +82,7 @@
   <g filter="url(#goo)"><use href="#shapeSrc" fill="#F4F1E6"/></g>
 
   <!-- inner layer: deep-green lines, visible only inside the shape -->
-  <g id="innerLayer" mask="url(#mIn)"></g>
+  <g id="innerLayer" mask="url(#mIn)"><circle id="hopeIn" cx="540" cy="960" r="452" fill="none" stroke="#0E3B2E" visibility="hidden"/></g>
 
   <!-- lime dot + glow inside the bump -->
   <g id="dotG">
@@ -107,8 +108,8 @@ const LINES = {
   C: [['بمنحه', 0], ['أكثر', 1], ['قليلاً', 1]],           // 1 = key phrase (bold + pill)
   D: [['مما', 0], ['كان', 0], ['يأمل', 0], ['فيه', 0]],
 };
-const T_ENTER = { B: 3.0, C: 5.25, D: 7.5 };                    // downbeat-aligned text changes
-const T_EXIT  = { A: 3.0, B: 5.25, C: 7.5 };
+const T_ENTER = { B: 3.0, C: 5.36, D: 7.62 };                    // downbeat-aligned text changes
+const T_EXIT  = { A: 5.08, B: 7.33, C: 9.6 };
 const T_A_BACK = 11.9;                                          // A is re-armed while the mask hides everything
 const T_BUMP = 6.0;
 
@@ -132,7 +133,7 @@ const spring = (tau, zeta, omega) => {
 /* ───────────────────────── layout (measured once, deterministic) ───────────────────────── */
 const $ = id => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
-const L = { DX0: 740, DX1: 290, YB_FINAL: 520, YB_HIDE: 800, lines: {} };
+const L = { DX0: 740, DX1: 0, YB_FINAL: 520, YB_HIDE: 800, lines: {} };
 
 function mk(tag, attrs, parent) {
   const e = document.createElementNS(NS, tag);
@@ -157,7 +158,7 @@ function buildLines() {
       });
       const gaps = words.map((w, i) => i === 0 ? 0 : GAP + ((w.key !== words[i-1].key) ? PAD : 0));
       total = words.reduce((s, w) => s + w.w, 0) + gaps.reduce((a, b) => a + b, 0);
-      if (total <= 950 || size <= 80) { words.gaps = gaps; words.g = g; break; }   // never overflow: shrink to ≥80
+      if (total <= 600 || size <= 80) { words.gaps = gaps; words.g = g; break; }   // never overflow: shrink to ≥80
       layer.removeChild(g); size -= 2;
     }
     // RTL placement: first word on the right
@@ -220,61 +221,118 @@ function dotAt(t) {                                          // lime dot scale/o
   return { s, op, glow: clamp((t - 6.12) / 0.5) * op };
 }
 
-/* ── life: wobble, beat squash, orbiting droplets, spill droplets, ripples (all pure functions of t) ── */
+/* ── the film explains the sentence ──
+   circle  = the person.  dashed ring = "what he hoped for".  small circle = the gift ("a little more").
+   A  two circles meet and become one round circle (sweetness = union).
+   B  the dashed ring blooms around it (his hope, a little bigger than he is). A gift appears out of nowhere → he hops in surprise.
+   C  the gift leaps, grows, lands on 6.0 → the circle swells to the ring, then a little past it, and spills one bump.
+   D  the dashed ring now sits INSIDE the shape: the shape is visibly bigger than the hope. Joy bubbles rise.        */
 const TAU = Math.PI * 2;
 const ramp = (t, a, b) => easeInOutCubic(clamp((t - a) / (b - a)));
-const wobEnv = t => ramp(t, 3.0, 3.8) * (1 - ramp(t, 9.1, 9.75));        // liquid wobble only while merged
-const SATS = [                                                          // little droplets that orbit through the blob and merge/split gooey
-  { a: 0.6, dir:  1, rx: 430, ry: 575, r: 46, w: TAU / 7.5, tIn: 2.95, tOut: 9.55 },
-  { a: 2.5, dir: -1, rx: 450, ry: 545, r: 32, w: TAU / 6.0, tIn: 3.20, tOut: 9.40 },
-  { a: 4.1, dir:  1, rx: 400, ry: 610, r: 58, w: TAU / 9.0, tIn: 3.05, tOut: 9.65 },
-  { a: 5.4, dir: -1, rx: 440, ry: 520, r: 26, w: TAU / 4.5, tIn: 3.60, tOut: 9.30 },
-  { a: 1.6, dir: -1, rx: 380, ry: 640, r: 38, w: TAU / 8.0, tIn: 4.30, tOut: 9.50 },
-  { a: 3.3, dir:  1, rx: 460, ry: 500, r: 22, w: TAU / 5.5, tIn: 5.20, tOut: 9.25 },
+const easeInOutSine = u => -(Math.cos(Math.PI * u) - 1) / 2;
+const R_PERSON = 418, R_HOPE = 452, R_OVER = 472;                        // before the gift · his hope · after the gift (+16 px = "a little more")
+const bigDx = t => t < 9.75 ? (t < 3.0 ? dxAt(t) : 0) : hermite((t - 9.75) / 2.25, 0, L.DX0, 0, 0);
+function bigR(t) {
+  if (t < 2.0) return R;
+  if (t < 3.0) return R + (R_PERSON - R) * easeInOutCubic(t - 2.0);
+  if (t < 5.25) return R_PERSON + 3 * Math.sin(TAU * (t - 3.0) / 1.5) * ramp(t, 3.0, 3.6);
+  if (t < 6.0) return R_PERSON + (R_HOPE - R_PERSON) * easeInCubic((t - 5.25) / 0.75);   // swells until it just touches the ring on the landing
+  if (t < 9.75) {
+    const settle = (R_OVER - R_HOPE) * spring(t - 6.0, 0.5, 12);                       // …and a little past it
+    return R_HOPE + settle + 5 * Math.sin(TAU * (t - 6.5) / 1.5) * ramp(t, 7.0, 7.6) * (1 - ramp(t, 9.2, 9.75));
+  }
+  return hermite((t - 9.75) / 2.25, R_OVER + 0.0, R, 0, 0);
+}
+function surprise(t) {                                                   // 4.85: the person hops when the gift shows up
+  const u = (t - 4.85) / 0.55;
+  if (u < 0 || u > 1) return 0;
+  return Math.sin(Math.PI * u);
+}
+const hopY = t => -24 * surprise(t);
+const blobTop = t => CY + hopY(t) - bigR(t);
+function bigPos(t) { const dx = bigDx(t), y = CY + hopY(t); return [{ x: CX - dx, y }, { x: CX + dx, y }]; }
+const GIFT_IN = 4.5, LEAP = [5.25, 6.0, 170];
+function giftState(t) {
+  const none = { x: CX, y: 900, rx: 0, ry: 0, r: 0 };
+  if (t < GIFT_IN || t >= 10.5) return none;
+  let x, y, rg = 70, sq = 0;
+  const HX = 835, HY = 330;
+  if (t < 5.05) {                                                        // arrives from off-screen, bounces to its hover spot
+    const u = (t - GIFT_IN) / 0.55;
+    x = 1260 + (HX - 1260) * easeOutCubic(u); y = HY - 120 * Math.sin(Math.PI * u) * (1 - u) * 1.6; sq = -0.12 * (1 - u);
+  } else if (t < LEAP[0]) {                                              // hovers, waiting (the pause before the gift is given)
+    x = HX; y = HY + 9 * Math.sin(TAU * (t - 5.05) / 0.5);
+  } else if (t < LEAP[1]) {                                              // the leap: arcs over to the top, grows 70 → 120
+    const u = (t - LEAP[0]) / (LEAP[1] - LEAP[0]), e = easeInOutSine(u);
+    rg = 70 + 50 * easeInOutCubic(u);
+    const tx = CX, ty = blobTop(t) - 83, sy = HY + 9 * Math.sin(TAU * 0.2 / 0.5);
+    x = HX + (tx - HX) * e; y = sy + (ty - sy) * u - 4 * LEAP[2] * u * (1 - u);
+    sq = -0.16 * Math.sin(Math.PI * u);
+  } else {
+    rg = 120;
+    const tau = t - LEAP[1];
+    x = CX; y = blobTop(t) - 83;
+    sq = 0.34 * Math.exp(-6 * tau) * Math.cos(TAU * tau / 0.5);
+    y -= 28 * Math.exp(-4 * tau) * Math.sin(TAU * tau / 0.5);               // the one real overshoot: the bump springs up past its rest
+    if (t >= 6.6 && t < 9.75) {
+      const bs = ramp(t, 6.6, 7.1) * (1 - ramp(t, 9.4, 9.75));
+      x += 9 * Math.sin(TAU * (t - 6.0) / 2.0) * bs; y += 6 * Math.sin(TAU * (t - 6.0) / 1.5) * bs;
+    }
+  }
+  if (t >= 9.75) {                                                       // bump sinks back into the blob, then dissolves inside it
+    const u = clamp((t - 9.75) / 0.7), rest = CY - R_OVER - 83;
+    x = CX; y = rest + (840 - rest) * easeInOutCubic(u); sq = 0;
+    rg = 120 * (1 - easeInCubic(clamp((t - 10.05) / 0.4)));
+  }
+  const ry = rg / (1 + sq), rx = rg * (1 + sq);
+  return { x, y: y + (rg - ry) * 0.9, rx, ry, r: rg };
+}
+const DROPS = [                                                          // splash droplets thrown off by the landing, falling back into the blob
+  { t0: 6.04, x0: 540, vx: -500, vy: -520, r: 32 },
+  { t0: 6.14, x0: 540, vx:  430, vy: -480, r: 26 },
+  { t0: 6.26, x0: 540, vx: -260, vy: -430, r: 19 },
+  { t0: 6.38, x0: 540, vx:  250, vy: -450, r: 16 },
 ];
-const DROPS = [                                                         // liquid spilling over the cup right after the bump
-  { t0: 6.06, x0: 540, vx: -500, vy: -520, r: 32 },
-  { t0: 6.18, x0: 540, vx:  430, vy: -480, r: 26 },
-  { t0: 6.30, x0: 540, vx: -260, vy: -430, r: 19 },
-  { t0: 6.42, x0: 540, vx:  250, vy: -450, r: 16 },
-];
-const G = 2600, DROP_Y0 = 440, LAND_Y = 520;
+const G = 2600, DROP_Y0 = 420;
+const surfY = off => CY - Math.sqrt(R_OVER * R_OVER - off * off);        // blob top at horizontal offset `off`
+DROPS.forEach(d => { let tl = 0.5; for (let k = 0; k < 6; k++) { d.land = surfY(d.vx * tl) + 6; const A = G / 2, B = d.vy, C = DROP_Y0 - d.land; tl = (-B + Math.sqrt(B * B - 4 * A * C)) / (2 * A); } d.tl = tl; });
 function dropPos(d, t) {
   const tau = t - d.t0; if (tau < 0) return { x: d.x0, y: DROP_Y0, r: 0 };
-  // time of landing on y = LAND_Y: DROP_Y0 + vy τ + ½ G τ² = LAND_Y
-  const A = G / 2, B = d.vy, C = DROP_Y0 - LAND_Y, tl = (-B + Math.sqrt(B * B - 4 * A * C)) / (2 * A);
-  if (tau > tl) return { x: d.x0 + d.vx * tl, y: LAND_Y, r: 0 };
-  const grow = easeOutCubic(clamp(tau / 0.08)), sink = 1 - easeInCubic(clamp((tau - (tl - 0.14)) / 0.14));
+  if (tau > d.tl) return { x: d.x0 + d.vx * d.tl, y: d.land, r: 0 };
+  const grow = easeOutCubic(clamp(tau / 0.08)), sink = 1 - easeInCubic(clamp((tau - (d.tl - 0.14)) / 0.14));
   return { x: d.x0 + d.vx * tau, y: DROP_Y0 + d.vy * tau + 0.5 * G * tau * tau, r: d.r * grow * sink };
 }
-function satPos(S, t) {
-  const e = easeOutCubic(clamp((t - S.tIn) / 0.8)) * (1 - easeInCubic(clamp((t - S.tOut) / 0.7)));
-  const th = S.a + S.dir * S.w * (t - 3.0), k = 0.62 + 0.38 * e;
-  const pulse = 1 + 0.12 * beatPulse(t, 3.0 + S.a * 0.1);
-  return { x: CX + S.rx * k * Math.cos(th), y: CY + S.ry * k * Math.sin(th), r: S.r * e * pulse };
+const BUBS = [                                                           // joy bubbles that rise out of the swollen shape and pop
+  { t0: 7.50, x: 250, rb: 30, dr:  14 }, { t0: 7.85, x: 830, rb: 26, dr: -12 }, { t0: 8.20, x: 370, rb: 22, dr: -10 },
+  { t0: 8.55, x: 710, rb: 34, dr:  12 }, { t0: 8.90, x: 170, rb: 18, dr:  10 }, { t0: 9.20, x: 910, rb: 20, dr: -10 },
+];
+function bubPos(b, t) {
+  const u = (t - b.t0) / 1.15; if (u < 0 || u >= 1) return { x: b.x, y: 700, r: 0 };
+  const r = b.rb * easeOutCubic(clamp(u / 0.2)) * (1 - easeInCubic(clamp((u - 0.55) / 0.45)));
+  return { x: b.x + b.dr * Math.sin(u * TAU), y: 710 - 420 * easeOutCubic(u), r };
 }
-function beatPulse(t, ph = 3.0) {                                       // 1 → 0 decay after each beat (0.75 s grid)
-  const u = ((t - ph) % 0.75 + 0.75) % 0.75;
-  return Math.exp(-u / 0.14);
-}
-function squash(t) {                                                    // whole-shape squash & stretch on beats; bigger on bar downbeats
-  if (t < 3.0 || t > 9.4) return { sx: 1, sy: 1 };
-  const k = Math.floor((t - 3.0) / 0.75), downbeat = k % 4 === 0;
-  const amp = (downbeat ? 0.032 : 0.012) * beatPulse(t, 3.0) * (1 - ramp(t, 8.9, 9.4));
+function beatPulse(t, ph = 3.0) { const u = ((t - ph) % 0.75 + 0.75) % 0.75; return Math.exp(-u / 0.14); }
+function squash(t) {
+  let amp = 0;
+  if (t >= 4.85 && t <= 5.4) { const u = (t - 4.85) / 0.55; amp = 0.05 * Math.sin(Math.PI * Math.min(u, 1)) * (u < 1 ? 1 : 0); }   // stretch tall mid-hop
+  if (t >= 6.75 && t <= 9.4) amp += 0.010 * beatPulse(t, 6.75) * (1 - ramp(t, 8.9, 9.4));
   return { sx: 1 - amp * 0.6, sy: 1 + amp };
 }
-function shapeState(t) {                                                // every circle that makes up the gooey shape
-  const we = wobEnv(t), ph = TAU * (t - 3.0) / 3.0;
-  const dx = dxAt(t) + 14 * Math.sin(ph * 2) * we, yw = 18 * Math.sin(ph) * we;
-  const b = bumpAt(t), bs = ramp(t, 6.6, 7.1) * (1 - ramp(t, 9.4, 9.75));
-  const bump = { x: CX + 9 * Math.sin(TAU * (t - 6.0) / 2.0) * bs, y: b.y + 6 * Math.sin(TAU * (t - 6.0) / 1.5) * bs,
-                 r: b.r * (1 + 0.035 * Math.sin(TAU * (t - 6.0) / 1.5) * bs) };
-  const out = [{ x: CX - dx, y: CY + yw, r: R }, { x: CX + dx, y: CY - yw, r: R }, bump];
-  SATS.forEach(S => out.push(satPos(S, t)));
+function shapeState(t) {                                                 // every primitive that makes up the gooey shape
+  const r = bigR(t), [l, rr] = bigPos(t);
+  const out = [{ x: l.x, y: l.y, r }, { x: rr.x, y: rr.y, r }, giftState(t)];
   DROPS.forEach(d => out.push(dropPos(d, t)));
+  BUBS.forEach(b => out.push(bubPos(b, t)));
   return out;
 }
 
+function slotOf(name, t) {                                               // 2-line stack: current line low, previous line above and dimmed
+  const SL = 73, mv = (a) => easeOutCubic(clamp((t - a) / 0.42));
+  if (name === 'A') { if (t >= T_A_BACK || t < 3.0) return { y: 0, dim: 1 }; const m = mv(3.0); return { y: -SL * m, dim: 1 - 0.68 * m }; }
+  if (name === 'B') { if (t < 5.25) return { y: SL, dim: 1 }; const m = mv(5.25); return { y: SL - 2 * SL * m, dim: 1 - 0.68 * m }; }
+  if (name === 'C') { if (t < 7.5) return { y: SL, dim: 1 }; const m = mv(7.5); return { y: SL - 2 * SL * m, dim: 1 - 0.68 * m }; }
+  return { y: SL, dim: 1 };
+}
 function wordState(name, i, t) {                                        // → {dy, op, s} for each word of a line
   const fl = 4.5 * Math.sin(TAU * t / 3 + i * 0.9);                      // gentle float once a word has settled
   const hidden = { dy: 40, op: 0, s: .92 }, rest = { dy: 0, op: 1, s: 1 };
@@ -304,7 +362,9 @@ let circleEls = null;
 function render(tt) {
   const t = ((tt % DUR) + DUR) % DUR;
   const st = shapeState(t), b = st[2], br = breathe(t), d = dotAt(t), sq = squash(t);
-  st.forEach((c, i) => { const e = circleEls[i]; e.setAttribute('cx', c.x.toFixed(3)); e.setAttribute('cy', c.y.toFixed(3)); e.setAttribute('r', Math.max(0, c.r).toFixed(3)); });
+  st.forEach((c, i) => { const e = circleEls[i]; e.setAttribute('cx', c.x.toFixed(3)); e.setAttribute('cy', c.y.toFixed(3));
+    if (c.rx !== undefined) { e.setAttribute('rx', Math.max(0, c.rx).toFixed(3)); e.setAttribute('ry', Math.max(0, c.ry).toFixed(3)); }
+    else e.setAttribute('r', Math.max(0, c.r).toFixed(3)); });
   const tf = `translate(${CX} ${CY}) scale(${(br * sq.sx).toFixed(5)} ${(br * sq.sy).toFixed(5)}) translate(${-CX} ${-CY})`;
   $('shapeSrc').setAttribute('transform', tf);
 
@@ -320,6 +380,19 @@ function render(tt) {
   $('dotGlow').setAttribute('opacity', (0.9 * d.glow).toFixed(4));
   $('dotGlow').setAttribute('r', (32 * Math.max(d.s, 0)).toFixed(3));
 
+  // the dashed "hope" ring: cream where it is on green, deep green where the shape has grown past it
+  {
+    const on = t >= 3.0 && t < 10.4;
+    let rr = R_HOPE, sw = 6, op = 1;
+    if (t < 3.7) { const u = easeOutCubic((t - 3.0) / 0.7); rr = R_PERSON + (R_HOPE - R_PERSON) * u; sw = 6 * u; }
+    if (t >= 7.5 && t < 8.3) { rr += 8 * Math.sin(Math.PI * (t - 7.5) / 0.8); sw = 6 + 3 * Math.sin(Math.PI * (t - 7.5) / 0.8); }   // ring pulses on «مما كان يأمل فيه»
+    if (t >= 9.75) { const u = easeInCubic(clamp((t - 9.75) / 0.65)); rr = R_HOPE + (R_OVER - R_HOPE) * u; sw = 6 * (1 - u); }
+    for (const id of ['hopeOut', 'hopeIn']) {
+      const e = $(id); e.setAttribute('visibility', on ? 'visible' : 'hidden');
+      if (on) { e.setAttribute('r', rr.toFixed(2)); e.setAttribute('stroke-width', sw.toFixed(2)); e.setAttribute('stroke-dasharray', '30 24');
+        e.setAttribute('stroke-dashoffset', (-(t - 3.0) * 22).toFixed(2)); e.setAttribute('stroke-linecap', 'round'); e.setAttribute('transform', `translate(0 ${hopY(t).toFixed(2)})`); }
+    }
+  }
   // ripples on the green: one when the blob lands (3.0), two when the bump spills over (6.0)
   RINGS.forEach((rg, i) => {
     const u = clamp((t - rg.t0) / rg.dur), e = easeOutCubic(u), el = ringEls[i];
@@ -333,7 +406,8 @@ function render(tt) {
     const o = L.lines[name];
     let any = false;
     o.words.forEach((w, i) => {
-      const s = wordState(name, i, t);
+      const s = wordState(name, i, t), sl = slotOf(name, t);
+      s.dy += sl.y; s.op *= sl.dim;
       w.st = s;
       w.el.setAttribute('transform', `translate(${w.cx.toFixed(2)} ${(L.cy + s.dy).toFixed(3)}) scale(${s.s.toFixed(4)}) translate(${(-w.cx).toFixed(2)} ${-L.cy})`);
       w.el.setAttribute('opacity', s.op.toFixed(4));
@@ -352,9 +426,9 @@ function render(tt) {
 }
 
 const RINGS = [
-  { t0: 3.0, x: CX, y: CY, r0: 470, r1: 820, dur: 1.3, a: .35 },
-  { t0: 6.0, x: CX, y: 520, r0: 120, r1: 760, dur: 1.5, a: .55 },
-  { t0: 6.2, x: CX, y: 520, r0: 120, r1: 760, dur: 1.5, a: .35 },
+  { t0: 4.85, x: CX, y: CY, r0: 440, r1: 760, dur: 1.1, a: .35 },
+  { t0: 6.0, x: CX, y: 410, r0: 120, r1: 820, dur: 1.5, a: .55 },
+  { t0: 6.2, x: CX, y: 410, r0: 120, r1: 820, dur: 1.5, a: .35 },
 ];
 let ringEls = null;
 
@@ -382,7 +456,7 @@ window.ready = (async () => {
   window.fontOK = document.fonts.check('700 118px "Noto Naskh Arabic"', all) && document.fonts.check('600 92px "Noto Naskh Arabic"', all);
   const src = $('shapeSrc');
   circleEls = [$('cL'), $('cR'), $('cB')];
-  for (let i = 0; i < SATS.length + DROPS.length; i++) circleEls.push(mk('circle', { r: 0 }, src));
+  for (let i = 0; i < DROPS.length + BUBS.length; i++) circleEls.push(mk('circle', { r: 0 }, src));
   ringEls = RINGS.map(() => mk('circle', { fill: 'none', visibility: 'hidden' }, $('rings')));
   buildLines();
   L.cy = 986 - 30;
